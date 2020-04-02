@@ -33,7 +33,7 @@ const sensors = [
             "lable": "L1",
             "scale": "A"
         },
-        {
+        /*{
             "sensor": "L2.1",
             "lable": "L2",
             "scale": "A"
@@ -42,9 +42,9 @@ const sensors = [
             "sensor": "L3.1",
             "lable": "L3",
             "scale": "A"
-        }
+        }*/
     ],
-    [
+    /*[
         //.1 genauigkeit
         //L1.1+L1.2, L2.1+L2.2, L3.1+L3.2
         {
@@ -62,25 +62,90 @@ const sensors = [
             "lable": "32",
             "scale": "A"
         }
-    ]
+    ]*/
 ]
 
+const _baseConfig = {
+    cred: { username: "", password: "" },
+    proto: "https",
+    hostSuffix: "",
+    mapping: { offset: 2 },
+    cookiePath: "panduitSmartZoneG5SensorPlugin.cookies.json"
+};
+
 function _storeCookie(pdu) {
-    fs.readFile(path.join(__dirname, "panduitSmartZoneG5SensorPlugin.json"), (err, data) => {
-        let config = JSON.parse(data.toString());
-        config.cookies[pdu.url] = pdu.cookie;
-        fs.writeFile(path.join(__dirname, "panduitSmartZoneG5SensorPlugin.json"), JSON.stringify(config), (err) => {
-            if (err) {
-                console.error("Store Cookie", err);
+    _getConfig().then(conf => {
+        fs.readFile(path.join(__dirname, conf.cookiePath), (err, data) => {
+            let cookies = { cookies: {} };
+            if (!err) {
+                cookies = JSON.parse(data.toString());
             }
+            cookies.cookies[pdu.url] = pdu.cookie;
+            fs.writeFile(path.join(__dirname, conf.cookiePath), JSON.stringify(cookies), (err) => {
+                if (err) {
+                    console.error("Store Cookie", err);
+                }
+            });
+        });
+    })
+}
+
+function _getCookie(pdu) {
+    return new Promise((accept) => {
+        _getConfig().then(conf => {
+            fs.readFile(path.join(__dirname, conf.cookiePath), (err, data) => {
+                if (!err) {
+                    let cookies = JSON.parse(data.toString());
+                    try {
+                        pdu.cookie = cookies.cookies[pdu.url];
+                    } catch (e) { }
+                }
+                accept(pdu);
+            });
+        });
+    });
+}
+
+function _fillPDU(conf, lock) {
+    return new Promise(accept => {
+        let pdu = {}
+        pdu.cred = conf.cred;
+        pdu.proto = conf.proto;
+        pdu.hostSuffix = conf.hostSuffix;
+
+        let ipSegs = lock.ip.split(".");
+        ipSegs[3] = parseInt(ipSegs[3]) + conf.mapping.offset;
+        pdu.host = ipSegs.join(".");
+
+        if (conf.mapping[lock.ip] != undefined) {
+            let mapping = conf.mapping[lock.ip];
+            if (mapping.host != undefined) {
+                pdu.host = mapping.host;
+            }
+            if (mapping.cred != undefined) {
+                pdu.cred = mapping.cred;
+            }
+            if (mapping.proto != undefined) {
+                pdu.proto = mapping.proto;
+            }
+            if (mapping.hostSuffix != undefined) {
+                pdu.hostSuffix = mapping.hostSuffix;
+            }
+        }
+
+        pdu.url = `${pdu.proto}://${pdu.host}${pdu.hostSuffix}`;
+
+        _getCookie(pdu).then(pdu => {
+            accept(pdu);
         });
     });
 }
 
 function _auth(pdu) {
     return new Promise((resolve, reject) => {
-        _axios.post(`${pdu.url}/xhrlogin.jsp`, json = { cookie: 0, username: pdu.username, password: pdu.password })
+        _axios.post(`${pdu.url}/xhrlogin.jsp`, json = { cookie: 0, username: pdu.cred.username, password: pdu.cred.password })
             .then(res => {
+                console.log("Done LOGIN", pdu);
                 pdu.cookie = res.data.cookie;
                 _storeCookie(pdu);
                 resolve(pdu);
@@ -93,10 +158,11 @@ function _auth(pdu) {
 }
 
 function _getConfig() {
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
         fs.readFile(path.join(__dirname, "panduitSmartZoneG5SensorPlugin.json"), (err, data) => {
             if (err) {
-                reject(err);
+                //console.warn("[WARN] Panduit SensorPlugin FetchConfig", err);
+                resolve(_baseConfig);
             } else {
                 resolve(JSON.parse(data.toString()));
             }
@@ -109,43 +175,45 @@ function _getSensors(lock) {
         _getConfig()
             .then(conf => {
                 var responseSensors = JSON.parse(JSON.stringify(sensors));
-                let pdu = conf.mapping[lock.ip];
-                if (!pdu) {
-                    _fillAllWithText(responseSensors, "NoMapping");
-                    resolve(responseSensors);
-                    return;
-                }
-                pdu.cookie = conf.cookies[pdu.url];
-                _fetchExtSensors(pdu, ["T", "RH"])
-                    .then(([pdu, extSensors]) => {
-                        responseSensors[0].value = extSensors[0];
-                        responseSensors[1].value = extSensors[1];
-                        _fetchAmps(pdu)
-                            .then((amps) => {
-                                let i = 0;
-                                responseSensors[2].forEach(amp => {
-                                    amp.value = amps[i++];
-                                })
-                                responseSensors[3].forEach(amp => {
-                                    amp.value = amps[i++];
-                                })
-                                resolve(responseSensors)
-                            })
-                            .catch(err => {
-                                console.error("ErrorAmps",err);
-                                responseSensors[2].forEach(amp => {
-                                    amp.value = "ErrFetch";
-                                })
-                                responseSensors[3].forEach(amp => {
-                                    amp.value = "ErrFetch";
-                                })
-                                resolve(responseSensors);
-                            })
-                    })
-                    .catch(err=>{
-                        _fillAllWithText(responseSensors,err);
+                //let pdu = conf.mapping[lock.ip];
+                _fillPDU(conf, lock).then(pdu => {
+                    if (!pdu) {
+                        _fillAllWithText(responseSensors, "NoMapping");
                         resolve(responseSensors);
-                    });
+                        return;
+                    }
+                    _fetchExtSensors(pdu, ["T", "RH"])
+                        .then(([pdu, extSensors]) => {
+                            responseSensors[0].value = extSensors[0];
+                            responseSensors[1].value = extSensors[1];
+                            _fetchAmps(pdu)
+                                .then((amps) => {
+                                    let i = 0;
+                                    responseSensors[2].forEach(amp => {
+                                        amp.value = amps[i++];
+                                    });
+                                    if (responseSensors.length == 4) //Has Dual CB
+                                        responseSensors[3].forEach(amp => {
+                                            amp.value = amps[i++];
+                                        });
+                                    resolve(responseSensors)
+                                })
+                                .catch(err => {
+                                    console.error("ErrorAmps", err);
+                                    responseSensors[2].forEach(amp => {
+                                        amp.value = "ErrFetch";
+                                    })
+                                    responseSensors[3].forEach(amp => {
+                                        amp.value = "ErrFetch";
+                                    })
+                                    resolve(responseSensors);
+                                })
+                        })
+                        .catch(err => {
+                            _fillAllWithText(responseSensors, err);
+                            resolve(responseSensors);
+                        });
+                });
             })
             .catch(err => {
                 console.error(err);
@@ -182,13 +250,16 @@ function _fetchExtSensors(pdu, sensors, retry = 0) {
                 if (retry == 0 && err.response && err.response.status && err.response.status == 401) {
                     _auth(pdu)
                         .then(pdu => {
+                            console.log("DONE AUTH")
                             _fetchExtSensors(pdu, sensors, 1)
                                 .then(([pdu, vals]) => resolve([pdu, vals]));
                         })
                         .catch(err => {
+                            console.error("PDU Auth", err);
                             reject("ErrAuth");
                         });
                 } else {
+                    console.error("ExtSensErr");
                     reject("ErrExtSens");
                 }
             })
@@ -214,6 +285,8 @@ function _fetchAmps(pdu) {
 };
 
 module.exports = {
+    name: () => "panduitSmartZoneG5SensorPlugin",
+
     init: (config) => {
         _axios = config.axios;
     },
@@ -224,4 +297,46 @@ module.exports = {
     },
 
     getSensors: _getSensors,
+
+    getConfig: () => {
+        return new Promise(accept => {
+            _getConfig().then(conf => {
+                accept(conf);
+            }).catch(e => {
+                accept(_baseConfig);
+            });
+        });
+    },
+
+    writeConfig: (config) => {
+        fs.writeFile(path.join(__dirname, "panduitSmartZoneG5SensorPlugin.json"), JSON.stringify(config), (err) => {
+            if (err) {
+                console.error("Store Config", err);
+            }
+        });
+    },
+
+    getHelp: () => {
+        return '\
+{\n\
+    "cred": {\n\
+        "username": "", //globalPanduit UserName\n\
+        "password": ""  //globalPanduit Password\n\
+    },\n\
+    proto: "https", //ConnectionProtocol\n\
+    hostSuffix: "", //Suffix after host of URL (eg ":8443")\n\
+    "mapping": {\n\
+        "offset": 2  //lockIP Offset (eg 192.168.0.90 + 2 = 192.168.0.92)\n\
+        "192.168.0.90":{ //optional manual Mapping for 192.168.0.90\n\
+            //the overwrite can contain all previous "baseSettings" (cred, proto, hostSuffix)\n\
+            "cred": { //manual User Overwrite for 192.168.0.90\n\
+                "username": "", //globalPanduit UserName\n\
+                "password": ""  //globalPanduit Password\n\
+            }\n\
+            host: "192.168.2.90 //Manual Host overwrite for 192.168.0.90\n\
+        }\n\
+    },\n\
+    "cookiePath": "panduitSmartZoneG5SensorPlugin.cookies.json" //defaultCookieStoreFile\n\
+}';
+    }
 }
