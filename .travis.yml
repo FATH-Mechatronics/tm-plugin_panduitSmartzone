@@ -1,0 +1,25 @@
+language: node_js
+
+node_js:
+- lts/*
+
+script:
+- yarn install
+- zip -r tm-plugin_panduitSmartzone.zip node_modules *.js
+
+before_deploy:
+- git config --local user.name "Travis CI"
+- git config --local user.email "build@travis-ci.org"
+- export TRAVIS_TAG=${TRAVIS_TAG:-$(date +'%Y%m%d%H%M%S')-$(git log --format=%h -1)}
+- git tag $TRAVIS_TAG
+
+deploy:
+  provider: releases
+  api_key:
+    secure: Jo72Gddk6JDN/ot/vaqzOMkDnHbrzj6DT72PmIrcQLTuY5nd7Zzmq21xMEPEHL9Cj6tvI6zhHNa4QvD6uJ8zWs5BI7E3PeepmH+fwMhj0lq5tcSIIvdqtJejKhnB05kxnFjUKlrRXhBnLFuQIxVWWEy1ond68ALsl5teWicQxhQ1T1OKSdczIbWycvU2YvMH6iZob+xazWiBwEULjlXQGW3AWWVXISHbXXrK4pfHHZsdy904nd2l738AEwrWsG34kjfysPikcdKAuTneyl4LHDLNTY4RnX+yz8pJ2W6La9fLGVyndvmtYIhZzW/ACVEczdeNQXthIuJ7TnoZ+sx8lhO6eMGOIBOTb8Y/oHEsdfyIBBfXVJn815P/u8og7UHH/FUEZR6qJaSp22X+KztJKgJjYc9tZZ9wMGn9NrJdhROWOWv+b/mI0ZwqjxGuiQfdbP1Qr8U2Qhn3hqxHplBAFSjsyva6m0HoOYbGgCp4h6F+Ve18Ft2xfedTkb32Nv+pp5EfxFycvV8pqxrkltyynjbhrw3AJb752WRzwqYeQNzIOrc9itIZxoavP09fnfoeLG84t9pRCEXkaEgM4zmNIydQnnV9vxuOg2O0DAusA40Fj1KqDgQWtl1gImMs2mztmNuzacONJLkSaL08lCm7EXQLma3+RQs3PO+CarfBj9Y=
+  file: ./tm-plugin_panduitSmartzone.zip
+  skip_cleanup: true
+  on:
+    branch: master
+    node_js: lts/*
+    repo: FATH-Mechatronics/tm-plugin_panduitSmartzone
